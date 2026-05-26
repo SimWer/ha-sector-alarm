@@ -21,6 +21,15 @@
           "password": "Password",
           "pin": "PIN code"
         }
+      },
+      "reconfigure": {
+        "title": "Sector Alarm — edit settings",
+        "description": "Update credentials or PIN for panel {panel_id}. Leave PIN blank to be prompted in the UI on every arm/disarm.",
+        "data": {
+          "email": "Email",
+          "password": "Password",
+          "pin": "PIN code"
+        }
       }
     },
     "error": {

@@ -51,6 +51,10 @@ interval (default 60 s, min 30, max 600).
 - Only one panel per config entry. Add multiple entries if you have more sites.
 - Push/realtime updates aren't available — Sector doesn't expose a websocket, so
   this is polling only.
+- Auth is via Sector's Auth0-backed flow (`isNewSASCustomer` accounts). Legacy
+  cookie-only customers from before the migration aren't tested.
+- Smoke detectors, water-leak detectors and humidity sensors aren't wired up yet
+  (Sector exposes them on separate endpoints) — patches welcome.
 
 ## License
 

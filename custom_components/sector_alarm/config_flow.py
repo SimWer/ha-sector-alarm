@@ -95,6 +95,45 @@ class SectorAlarmConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="user", data_schema=_USER_SCHEMA, errors=errors
         )
 
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Edit credentials and PIN without removing the integration."""
+        entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            err = await _validate(
+                self.hass,
+                user_input[CONF_EMAIL],
+                user_input[CONF_PASSWORD],
+                entry.data[CONF_PANEL_ID],
+                user_input.get(CONF_PIN, ""),
+            )
+            if err:
+                errors["base"] = err
+            else:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data={
+                        **entry.data,
+                        CONF_EMAIL: user_input[CONF_EMAIL],
+                        CONF_PASSWORD: user_input[CONF_PASSWORD],
+                        CONF_PIN: user_input.get(CONF_PIN, ""),
+                    },
+                )
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_EMAIL, default=entry.data.get(CONF_EMAIL, "")): str,
+                    vol.Required(CONF_PASSWORD, default=entry.data.get(CONF_PASSWORD, "")): str,
+                    vol.Optional(CONF_PIN, default=entry.data.get(CONF_PIN, "")): str,
+                }
+            ),
+            errors=errors,
+            description_placeholders={"panel_id": entry.data[CONF_PANEL_ID]},
+        )
+
     async def async_step_reauth(
         self, entry_data: Mapping[str, Any]
     ) -> ConfigFlowResult:

@@ -82,9 +82,9 @@ class SectorLock(SectorBaseEntity, LockEntity):
             raise HomeAssistantError(f"Lock failed: {err}") from err
         await self.coordinator.async_request_refresh()
 
-    async def async_unlock(self, **kwargs) -> None:
+    async def async_unlock(self, code: str | None = None, **kwargs) -> None:
         try:
-            await self.coordinator.client.unlock_door(self.serial)
+            await self.coordinator.client.unlock_door(self.serial, code=code)
         except SectorApiError as err:
             raise HomeAssistantError(f"Unlock failed: {err}") from err
         await self.coordinator.async_request_refresh()
