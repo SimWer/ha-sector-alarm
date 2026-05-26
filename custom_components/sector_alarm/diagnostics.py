@@ -30,6 +30,7 @@ async def async_get_config_entry_diagnostics(
             "panel": asdict(data.panel) if data else None,
             "contacts": [asdict(c) for c in data.contacts] if data else [],
             "temperatures": [asdict(t) for t in data.temperatures] if data else [],
+            "humidities": [asdict(h) for h in data.humidities] if data else [],
             "locks": [asdict(lk) for lk in data.locks] if data else [],
         },
     }

@@ -10,7 +10,7 @@ It exposes:
 |-----------------------|--------------------------------------------|
 | `alarm_control_panel` | Arm Away / Arm Home / Disarm               |
 | `binary_sensor`       | Door & window contact sensors              |
-| `sensor`              | Temperature sensors                        |
+| `sensor`              | Temperature **and** humidity sensors       |
 | `lock`                | Smart locks (lock / unlock)                |
 
 ## Installation
@@ -53,8 +53,8 @@ interval (default 60 s, min 30, max 600).
   this is polling only.
 - Auth is via Sector's Auth0-backed flow (`isNewSASCustomer` accounts). Legacy
   cookie-only customers from before the migration aren't tested.
-- Smoke detectors, water-leak detectors and humidity sensors aren't wired up yet
-  (Sector exposes them on separate endpoints) — patches welcome.
+- Smoke detectors and water-leak detectors aren't wired up yet (Sector exposes
+  them on separate endpoints) — patches welcome.
 
 ## License
 

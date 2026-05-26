@@ -15,6 +15,7 @@ from homeassistant.components.alarm_control_panel import AlarmControlPanelState
 from .const import API_BASE_URL, API_VERSION_HEADER, USER_AGENT
 from .models import (
     ContactSensor,
+    HumiditySensor,
     LockInfo,
     PanelInfo,
     SectorData,
@@ -28,8 +29,9 @@ _LOGGER = logging.getLogger(__name__)
 _LOGIN_PATH = "/api/Login/Login"
 _PANEL_INFO_PATH = "/api/Panel/GetPanel"            # GET ?panelId=...
 _PANEL_STATUS_PATH = "/api/Panel/GetPanelStatus"    # GET ?panelId=...
-_TEMPERATURES_PATH = "/api/v2/housecheck/temperatures"   # GET (user-scoped via JWT)
-_DOORS_WINDOWS_PATH = "/api/housecheck/doorsandwindows"  # GET (user-scoped)
+_TEMPERATURES_PATH = "/api/v2/housecheck/temperatures"   # POST {panelId}
+_DOORS_WINDOWS_PATH = "/api/housecheck/doorsandwindows"  # POST {panelId}
+_HUMIDITY_PATH_TPL = "/api/housecheck/panels/{panel_id}/humidity"  # GET (panel in path)
 _LOCKS_GET_PATH = "/api/Locks/GetLocks"             # GET ?panelId=...  (legacy, may differ)
 _ARM_PATH = "/api/Panel/Arm"                        # POST — shape unconfirmed for new SAS
 _DISARM_PATH = "/api/Panel/Disarm"                  # POST — shape unconfirmed for new SAS
@@ -355,6 +357,47 @@ class SectorAlarmClient:
             temperature=temperature,
         )
 
+    async def get_humidity(self) -> list[HumiditySensor]:
+        """GET /api/housecheck/panels/{panel_id}/humidity.
+
+        Same Section → Place → Component shape as temperatures, but the panel
+        ID is in the path (not the body) and the request is a GET.
+        """
+        try:
+            data = await self._request(
+                "GET",
+                _HUMIDITY_PATH_TPL.format(panel_id=self._panel_id),
+            )
+        except SectorApiError as err:
+            _LOGGER.debug("humidity fetch failed (%s)", err)
+            return []
+        return [
+            self._parse_humidity(component)
+            for section in _housecheck_floors(data)
+            for place in (section.get("Places") or [])
+            if isinstance(place, dict)
+            for component in (place.get("Components") or [])
+            if isinstance(component, dict)
+        ]
+
+    @staticmethod
+    def _parse_humidity(item: dict[str, Any]) -> HumiditySensor:
+        raw = item.get("Humidity")
+        try:
+            humidity = float(raw) if raw not in (None, "") else None
+        except (TypeError, ValueError):
+            humidity = None
+        return HumiditySensor(
+            serial=str(
+                item.get("SerialNo")
+                or item.get("Serial")
+                or item.get("DeviceId")
+                or item.get("Id")
+            ),
+            name=str(item.get("Label") or item.get("Name") or "Humidity"),
+            humidity=humidity,
+        )
+
     async def get_doors_windows(self) -> list[ContactSensor]:
         """POST /api/housecheck/doorsandwindows.
 
@@ -433,10 +476,11 @@ class SectorAlarmClient:
         """Fetch panel info + status (required) and aux data (best-effort)."""
         # info + status must succeed — they're how we identify the panel and
         # get the alarm state. Aux fetches are tolerated to fail.
-        info, status, live_temps, contacts = await asyncio.gather(
+        info, status, live_temps, humidities, contacts = await asyncio.gather(
             self.get_panel_info(),
             self.get_panel_status(),
             self.get_temperatures(),
+            self.get_humidity(),
             self.get_doors_windows(),
         )
         panel = PanelInfo(
@@ -455,6 +499,7 @@ class SectorAlarmClient:
         return SectorData(
             panel=panel,
             temperatures=temps,
+            humidities=humidities,
             contacts=contacts,
             locks=locks,
         )

@@ -37,6 +37,13 @@ class TemperatureSensor:
 
 
 @dataclass(slots=True)
+class HumiditySensor:
+    serial: str
+    name: str
+    humidity: float | None
+
+
+@dataclass(slots=True)
 class LockInfo:
     serial: str
     name: str
@@ -49,6 +56,7 @@ class SectorData:
     panel: PanelInfo
     contacts: list[ContactSensor] = field(default_factory=list)
     temperatures: list[TemperatureSensor] = field(default_factory=list)
+    humidities: list[HumiditySensor] = field(default_factory=list)
     locks: list[LockInfo] = field(default_factory=list)
 
 
