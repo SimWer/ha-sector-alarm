@@ -1,0 +1,44 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sector Alarm",
+        "description": "Enter your My Pages credentials and the Panel ID for the site you want to control. You can find the Panel ID in the URL after logging in to mypages.sectoralarm.net (e.g. `#!/systems/01234567`).",
+        "data": {
+          "email": "Email",
+          "password": "Password",
+          "panel_id": "Panel ID",
+          "pin": "PIN code"
+        },
+        "data_description": {
+          "pin": "Required for arm/disarm and locks. Leave blank if you only want read-only sensors."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Sector Alarm — re-authenticate",
+        "description": "Your saved credentials for {email} were rejected. Enter the current password (and PIN if it changed).",
+        "data": {
+          "password": "Password",
+          "pin": "PIN code"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid email or password.",
+      "cannot_connect": "Could not reach Sector Alarm. Check your network and try again."
+    },
+    "abort": {
+      "already_configured": "This panel is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Sector Alarm options",
+        "data": {
+          "scan_interval": "Polling interval (seconds)"
+        }
+      }
+    }
+  }
+}

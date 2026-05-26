@@ -1,0 +1,13 @@
+{
+  "domain": "sector_alarm",
+  "name": "Sector Alarm",
+  "version": "0.1.0",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/simon-kaiasolutions/ha-sector-alarm",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/simon-kaiasolutions/ha-sector-alarm/issues",
+  "requirements": []
+}
