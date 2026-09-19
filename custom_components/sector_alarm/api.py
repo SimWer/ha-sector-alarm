@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from time import monotonic
 import json as _json
 import logging
 from typing import Any, Literal
@@ -12,7 +13,13 @@ from aiohttp import ClientResponseError, ClientSession
 
 from homeassistant.components.alarm_control_panel import AlarmControlPanelState
 
-from .const import API_BASE_URL, API_VERSION_HEADER, USER_AGENT
+from .const import (
+    API_BASE_URL,
+    API_VERSION_HEADER,
+    AUX_REFRESH_SECONDS,
+    PANEL_INFO_REFRESH_SECONDS,
+    USER_AGENT,
+)
 from .models import (
     ContactSensor,
     HumiditySensor,
@@ -159,6 +166,15 @@ class SectorAlarmClient:
         # Count every HTTP call we make, so a 429 can report exactly how many
         # requests preceded it instead of us inferring it from uptime.
         self._request_count = 0
+        # --- tiered polling cache ---
+        # Each tier keeps its last good payload so a slow tier's turn coming
+        # round, or failing, never blanks entities that were fine a second ago.
+        self._cache_info: dict[str, Any] | None = None
+        self._cache_temps: list[TemperatureSensor] = []
+        self._cache_humidities: list[HumiditySensor] = []
+        self._cache_contacts: list[ContactSensor] = []
+        self._last_info: float = 0.0
+        self._last_aux: float = 0.0
 
     @property
     def panel_id(self) -> str:
@@ -543,16 +559,58 @@ class SectorAlarmClient:
         )
 
     async def fetch_all(self) -> SectorData:
-        """Fetch panel info + status (required) and aux data (best-effort)."""
-        # info + status must succeed — they're how we identify the panel and
-        # get the alarm state. Aux fetches are tolerated to fail.
-        info, status, live_temps, humidities, contacts = await asyncio.gather(
-            self.get_panel_info(),
-            self.get_panel_status(),
-            self.get_temperatures(),
-            self.get_humidity(),
-            self.get_doors_windows(),
-        )
+        """Fetch the alarm state every poll; refresh slower data on its own tier.
+
+        Sector allows 60 requests per clock hour (see const.API_HOURLY_BUDGET).
+        Fetching all five endpoints on every poll spent 300/hour and left the
+        integration rate-limited for roughly fifty minutes of every hour. Only
+        GetPanelStatus carries state that changes minute to minute, so it is
+        the only call made every time:
+
+            GetPanelStatus   every poll            state
+            housecheck x3    AUX_REFRESH_SECONDS   temperatures/humidity/doors
+            GetPanel         PANEL_INFO_REFRESH_S  inventory, names, locks
+
+        At the 300s default that is 22 requests/hour with alarm state never
+        more than five minutes stale.
+        """
+        now = monotonic()
+        first_run = self._cache_info is None
+        need_info = first_run or (now - self._last_info) >= PANEL_INFO_REFRESH_SECONDS
+        need_aux = self._last_aux == 0.0 or (now - self._last_aux) >= AUX_REFRESH_SECONDS
+
+        # Status is the only unconditional call.
+        status = await self.get_panel_status()
+
+        if need_info:
+            try:
+                self._cache_info = await self.get_panel_info()
+                self._last_info = now
+            except SectorApiError:
+                # Inventory is static and we already have it; a failed refresh
+                # must not take the alarm offline. Only the very first fetch,
+                # which establishes the panel, is allowed to fail the poll.
+                if first_run:
+                    raise
+                _LOGGER.debug("GetPanel refresh failed; keeping cached inventory")
+        info = self._cache_info or {}
+
+        if need_aux:
+            live_temps, humidities, contacts = await asyncio.gather(
+                self.get_temperatures(),
+                self.get_humidity(),
+                self.get_doors_windows(),
+            )
+            # These getters return [] both when empty and when they failed, so
+            # only replace a cache that has something to replace it with.
+            if live_temps or not self._cache_temps:
+                self._cache_temps = live_temps
+            if humidities or not self._cache_humidities:
+                self._cache_humidities = humidities
+            if contacts or not self._cache_contacts:
+                self._cache_contacts = contacts
+            self._last_aux = now
+
         panel = PanelInfo(
             panel_id=self._panel_id,
             display_name=str(info.get("DisplayName") or "Sector"),
@@ -560,7 +618,7 @@ class SectorAlarmClient:
         )
         # Prefer live temperature values; fall back to the inventory from
         # GetPanel (which is what the user has if the v2 endpoint 404s).
-        temps = live_temps or self._parse_temperatures_from_panel(info)
+        temps = self._cache_temps or self._parse_temperatures_from_panel(info)
         locks = [
             self._parse_lock(item)
             for item in (info.get("Locks") or [])
@@ -569,8 +627,8 @@ class SectorAlarmClient:
         return SectorData(
             panel=panel,
             temperatures=temps,
-            humidities=humidities,
-            contacts=contacts,
+            humidities=self._cache_humidities,
+            contacts=self._cache_contacts,
             locks=locks,
         )
 
