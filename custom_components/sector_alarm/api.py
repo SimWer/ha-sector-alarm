@@ -56,7 +56,35 @@ class SectorAuthError(SectorApiError):
 
 
 class SectorRateLimitError(SectorApiError):
-    """The API is rate-limiting us."""
+    """The API is rate-limiting us.
+
+    Carries whatever the server disclosed about the limit, so the cause can be
+    measured rather than inferred from how long we lasted.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        headers: dict[str, str] | None = None,
+        body: str | None = None,
+        requests_made: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.headers = headers or {}
+        self.body = body
+        self.requests_made = requests_made
+
+    @property
+    def retry_after(self) -> int | None:
+        """Seconds the server asked us to wait, when it says so."""
+        value = self.headers.get("Retry-After")
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except ValueError:
+            return None
 
 
 def _normalize_panel_state(raw: Any) -> AlarmControlPanelState | None:
@@ -128,6 +156,9 @@ class SectorAlarmClient:
         self._cookie: dict[str, str] | None = None
         self._bearer: str | None = None
         self._login_lock = asyncio.Lock()
+        # Count every HTTP call we make, so a 429 can report exactly how many
+        # requests preceded it instead of us inferring it from uptime.
+        self._request_count = 0
 
     @property
     def panel_id(self) -> str:
@@ -163,6 +194,7 @@ class SectorAlarmClient:
         """POST /api/Login/Login → JWT in `AuthorizationToken` body field."""
         async with self._login_lock:
             payload = {"UserId": self._email, "Password": self._password}
+            self._request_count += 1
             try:
                 async with self._session.post(
                     f"{API_BASE_URL}{_LOGIN_PATH}",
@@ -180,7 +212,23 @@ class SectorAlarmClient:
                             f"Login rejected by Sector ({resp.status})"
                         )
                     if resp.status == 429:
-                        raise SectorRateLimitError("Rate-limited on login")
+                        interesting = {
+                            k: v for k, v in resp.headers.items()
+                            if "rate" in k.lower() or "retry" in k.lower()
+                            or "limit" in k.lower() or "quota" in k.lower()
+                        }
+                        _LOGGER.warning(
+                            "Sector rate-limited LOGIN after %s requests this "
+                            "session. rate-limit headers=%s body=%s",
+                            self._request_count, interesting or "(none)",
+                            body_text[:300] or "(empty)",
+                        )
+                        raise SectorRateLimitError(
+                            "Rate-limited on login",
+                            headers=dict(resp.headers),
+                            body=body_text,
+                            requests_made=self._request_count,
+                        )
                     if resp.status >= 400:
                         _LOGGER.warning(
                             "Sector login HTTP %s: %s", resp.status, body_text[:200],
@@ -226,6 +274,7 @@ class SectorAlarmClient:
         if self._bearer is None and self._cookie is None:
             await self.login()
 
+        self._request_count += 1
         try:
             async with self._session.request(
                 method,
@@ -256,7 +305,28 @@ class SectorAlarmClient:
                         f"Sector returned {resp.status} after re-auth: {body[:200]}"
                     )
                 if resp.status == 429:
-                    raise SectorRateLimitError(f"{method} {path} rate-limited")
+                    # Log everything the server disclosed. Sector does not
+                    # document its quota, so these headers are the only way to
+                    # know the real limit instead of inferring it from uptime.
+                    body = await resp.text()
+                    interesting = {
+                        k: v for k, v in resp.headers.items()
+                        if "rate" in k.lower() or "retry" in k.lower()
+                        or "limit" in k.lower() or "quota" in k.lower()
+                    }
+                    _LOGGER.warning(
+                        "Sector rate-limited %s %s after %s requests this session. "
+                        "rate-limit headers=%s body=%s all-headers=%s",
+                        method, path, self._request_count,
+                        interesting or "(none)", body[:300] or "(empty)",
+                        dict(resp.headers),
+                    )
+                    raise SectorRateLimitError(
+                        f"{method} {path} rate-limited",
+                        headers=dict(resp.headers),
+                        body=body,
+                        requests_made=self._request_count,
+                    )
                 if resp.status >= 400:
                     body = await resp.text()
                     _LOGGER.warning(
